@@ -1,4 +1,14 @@
-# Metaflow Play
-Understanding Metaflow via its tutorials.
+# Metaflow Project
+Showcasing different capabilities of Metaflow, MLFlow, TensorFlow and others.
 
-ML project using Metaflow coming soon...
+# Coming soon
+- [ ] TensorFlow model train
+- [ ] Unit Tests & GH Actions integration
+- [ ] MLFlow Integration
+- [ ] Jenkins Integration
+- [ ] Model Serving with TFX
+
+
+
+
+
