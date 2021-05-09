@@ -7,7 +7,7 @@ import sys
 from logging.handlers import TimedRotatingFileHandler
 
 FORMATTER = logging.Formatter("%(asctime)s — %(name)s — %(levelname)s — %(message)s")
-LOG_FILE = "my_app.log"
+LOG_FILE = "../logs/python/MetaFlowTensoflow.log"
 
 def get_console_handler():
    """

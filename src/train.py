@@ -1,3 +1,6 @@
+import os
+os.environ["METAFLOW_DATASTORE_SYSROOT_LOCAL"] = "../logs/metaflow"
+
 import sys
 sys.path.append("../src")
 import preprocess as pp
@@ -178,25 +181,33 @@ class TensorflowPipeline(FlowSpec):
         """
         Step that gets the tensforflow model and performs the tests
         """
+        import mlflow
+        import mlflow.tensorflow
+        mlflow.tensorflow.autolog()
+        mlflow.set_tracking_uri("../logs/mlflow/mlruns")
+        experiment_id = mlflow.create_experiment("MetaFlow")
+
         # Get Data
         self.Xtest = self.Xtest
         self.ytest = self.ytest
 
-        # Get the Model
-        model = m.get_model(show_summary=True, num_params = self.one_hot_dict)
+        with mlflow.start_run(experiment_id = experiment_id):
+    
+            # Log the Data Dict
+            mlflow.log_params(self.one_hot_dict)
 
-        # Define Callbacks
-        checkpoint_cb = tf.keras.callbacks.ModelCheckpoint("../models/TensorflowPipeline.h5",
-                                                           save_best_only=True)
-        tensorboard_cb = tf.keras.callbacks.TensorBoard(u.get_run_logdir())
+            # Get the Model
+            model = m.get_model(show_summary=True, num_params = self.one_hot_dict)
 
-        # Train Model
-        model.fit(x=self.Xtrain, y=self.ytrain ,batch_size = 32,validation_split=0.2, epochs=5,
-                  callbacks=[checkpoint_cb,tensorboard_cb])
+            # Define Callbacks
+            checkpoint_cb = tf.keras.callbacks.ModelCheckpoint("../models/TensorflowPipeline.h5",
+                                                            save_best_only=True)
+                                                            
+            tensorboard_cb = tf.keras.callbacks.TensorBoard(u.get_run_logdir())
 
-        # Save Model
-
-
+            # Train Model
+            model.fit(x=self.Xtrain, y=self.ytrain ,batch_size = 32,validation_split=0.2, epochs=5,
+                    callbacks=[checkpoint_cb,tensorboard_cb])
 
         self.next(self.evaluate_model)
 
