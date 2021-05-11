@@ -4,10 +4,14 @@ Internal Module that handles Logging
 
 import logging
 import sys
+import os
 from logging.handlers import TimedRotatingFileHandler
 
+
 FORMATTER = logging.Formatter("%(asctime)s — %(name)s — %(levelname)s — %(message)s")
-LOG_FILE = "../logs/python/MetaFlowTensoflow.log"
+LOG_FILE = '../logs/python/MetaFlowTensorflow.log'
+
+os.makedirs(os.path.dirname(LOG_FILE),exist_ok = True)
 
 def get_console_handler():
    """
@@ -21,7 +25,7 @@ def get_file_handler():
    """
    Function to get the handler
    """
-   file_handler = TimedRotatingFileHandler(LOG_FILE, when='midnight')
+   file_handler = logging.FileHandler(LOG_FILE, mode="a")
    file_handler.setFormatter(FORMATTER)
    return file_handler
 

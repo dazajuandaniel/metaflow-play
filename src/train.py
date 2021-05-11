@@ -1,30 +1,52 @@
+"""
+Main file for Model Training
+"""
+# Import Core Libraries
 import os
-os.environ["METAFLOW_DATASTORE_SYSROOT_LOCAL"] = "../logs/metaflow"
-
 import sys
 sys.path.append("../src")
+
+# Setup Tracking Locations
+os.environ["METAFLOW_DATASTORE_SYSROOT_LOCAL"] = "../logs/metaflow"
+MLFLOW_TRACKING_URI = "../logs/mlflow/mlruns"
+OUTPUTS_LOCATION = "../models/outputs"
+
+# Import Libraries
+import pandas as pd
+import numpy as np
 import preprocess as pp
 import model_wide as m
 import utils as u
+from metaflow import FlowSpec, step, IncludeFile, metaflow_config, Flow, Parameter
+
+# Set up the Experiment
+import mlflow
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+# Set up Logging
 from logger import get_logger
 loggy = get_logger(__name__)
-
-import pandas as pd
-import numpy as np
-import tensorflow as tf
-import tensorflow_hub as hub
-from metaflow import FlowSpec, step, IncludeFile, metaflow_config, Flow
-metaflow_config.DATASTORE_LOCAL_DIR = '../data/.metadata'
-
 
 class TensorflowPipeline(FlowSpec):
     """
     A flow to train a tensorflow machine learning model.
-
-    The flow performs the following steps:
-    1) Ingests a CSV into a Pandas Dataframe.
-
     """
+
+    learning_rate = Parameter('learning_rate',
+                              help='Learning rate',
+                              required = False,
+                              default=0.01)
+
+    epochs = Parameter('epochs',
+                       help='Epochs',
+                       required = False,
+                       default=5)
+
+    exp_name = Parameter('experiment_name',
+                         help='Name for the experiment in MLFlow',
+                         required = False,
+                         default='TensorflowPipeline')
+
 
     @step
     def start(self):
@@ -35,11 +57,25 @@ class TensorflowPipeline(FlowSpec):
         3) Launches the next step.
 
         """
+        loggy.info("Metaflow Run Start")
         import pandas
         from io import StringIO
 
+        # Set the Experiment
+        mlflow.set_experiment(self.exp_name)
+        self.experiment_id = mlflow.get_experiment_by_name(self.exp_name).experiment_id
+        with mlflow.start_run():
+            self.run_id = mlflow.active_run().info.run_id
+            loggy.info(f"Running MLFlow logs in {str(self.run_id)}")
+            self.outputs_loc = OUTPUTS_LOCATION + f'/{self.run_id}'
+            os.makedirs(self.outputs_loc,exist_ok = True)
+
         # Load the data set into a pandas dataframe.
         self.clean_df = pandas.read_csv('../data/consumer_complaints_with_narrative.csv')
+
+        # Generate Sample and Log It
+        df = self.clean_df.sample(frac=.05, random_state=42)
+        df.to_html(self.outputs_loc+"/data_sample.html")
 
         # Divide Dataframe
         self.feature_names = ["product", "sub_product", "issue", "sub_issue", "state", "zip_code", 
@@ -69,8 +105,12 @@ class TensorflowPipeline(FlowSpec):
         """
         This step computes and stores statistics about the dataframe
         """
-        #run = Flow('TensorflowPipeline').latest_successful_run
-        file_location = "../data/" + 'run.id' + "_data_report"
+        import mlflow
+        mlflow.set_experiment(self.exp_name)
+        mlflow.start_run(run_id=self.run_id)
+
+        run = Flow('TensorflowPipeline')
+        file_location = self.outputs_loc+"/data_statistics_report.html"
         self.compute_statistics_result = pp.generate_pandas_profile(self.clean_df, file_location)
         self.next(self.join_process)
     
@@ -107,6 +147,8 @@ class TensorflowPipeline(FlowSpec):
         self.one_hot_features = self.one_hot_features
         self.numeric_features = self.numeric_features
 
+        self.run_id = self.run_id
+        self.outputs_loc = self.outputs_loc
         self.next(self.join_process)
     
     @step
@@ -135,37 +177,24 @@ class TensorflowPipeline(FlowSpec):
         self.raw_x = pd.concat([inputs.process_text_features.text_features_df,
                                 inputs.process_one_hot.one_hot_df,
                                 inputs.process_numeric_features.numeric_features_df['zip_code']],axis=1)
-
-        self.raw_x.to_parquet("../data/raw_x.parquet")
-        
-        loggy.info(f"Shape of raw_x is {str(self.raw_x.shape)}")
         assert self.raw_x.shape[1] == 7
 
         # Get Train/Test Split
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.raw_x, inputs.process_label.y, 
                                                                                 test_size=0.2, random_state=42)
-
-                    
+         
         # One Hot
         self.one_hot_dict = inputs.process_one_hot.one_hot_dict
-
         self.one_hot_train = pp.get_one_hot_vector(self.X_train, inputs.process_text_features.one_hot_features)
         self.one_hot_test = pp.get_one_hot_vector(self.X_test, inputs.process_text_features.one_hot_features)
-        # self.one_hot_x = [np.asarray(tf.keras.utils.to_categorical(inputs.process_one_hot.one_hot_df[feature_name].values)) 
-        #                   for feature_name in self.raw_x[inputs.process_text_features.one_hot_features]]
-
-        
 
         # Numeric
         self.numeric_train = [self.X_train['zip_code'].values]
         self.numeric_test = [self.X_test['zip_code'].values]
-        # self.numeric_x = [self.raw_x['zip_code'].values]
 
         # Text
         self.embedding_train = pp.get_text_embedding(self.X_train, inputs.process_text_features.text_features)
         self.embedding_test = pp.get_text_embedding(self.X_test, inputs.process_text_features.text_features)
-        # self.embedding_x = [np.asarray(inputs.process_text_features.text_features_df[feature_name].values).reshape(-1) 
-        #                     for feature_name in self.raw_x[inputs.process_text_features.text_features]]
 
         # Create final dataframe
         self.Xtrain = self.one_hot_train + self.numeric_train + self.embedding_train
@@ -174,6 +203,8 @@ class TensorflowPipeline(FlowSpec):
         self.ytrain = self.y_train
         self.ytest = self.y_test
 
+        self.run_id = inputs.process_text_features.run_id
+        self.outputs_loc = inputs.process_text_features.outputs_loc
         self.next(self.train_model)
 
     @step
@@ -181,23 +212,27 @@ class TensorflowPipeline(FlowSpec):
         """
         Step that gets the tensforflow model and performs the tests
         """
+        import tensorflow as tf
+        import tensorflow_hub as hub
         import mlflow
         import mlflow.tensorflow
+        mlflow.set_experiment(self.exp_name)
         mlflow.tensorflow.autolog()
-        mlflow.set_tracking_uri("../logs/mlflow/mlruns")
-        experiment_id = mlflow.create_experiment("MetaFlow")
 
         # Get Data
         self.Xtest = self.Xtest
         self.ytest = self.ytest
 
-        with mlflow.start_run(experiment_id = experiment_id):
+        with mlflow.start_run(run_id = self.run_id):
     
             # Log the Data Dict
             mlflow.log_params(self.one_hot_dict)
 
             # Get the Model
-            model = m.get_model(show_summary=True, num_params = self.one_hot_dict)
+            model = m.get_model(num_params = self.one_hot_dict,
+                                learning_rate = self.learning_rate, 
+                                show_summary=True,
+                                plot_image = self.outputs_loc+'/model_image.png')
 
             # Define Callbacks
             checkpoint_cb = tf.keras.callbacks.ModelCheckpoint("../models/TensorflowPipeline.h5",
@@ -206,7 +241,7 @@ class TensorflowPipeline(FlowSpec):
             tensorboard_cb = tf.keras.callbacks.TensorBoard(u.get_run_logdir())
 
             # Train Model
-            model.fit(x=self.Xtrain, y=self.ytrain ,batch_size = 32,validation_split=0.2, epochs=5,
+            model.fit(x=self.Xtrain, y=self.ytrain ,batch_size = 32,validation_split=0.2, epochs=self.epochs,
                     callbacks=[checkpoint_cb,tensorboard_cb])
 
         self.next(self.evaluate_model)
@@ -216,8 +251,19 @@ class TensorflowPipeline(FlowSpec):
         """
         Function that evaluates the model
         """
+        import tensorflow as tf
+        import tensorflow_hub as hub
+        import mlflow
+        mlflow.set_experiment(self.exp_name)
+        mlflow.start_run(run_id=self.run_id)
+        self.outputs_loc = self.outputs_loc
+
         model = tf.keras.models.load_model("../models/TensorflowPipeline.h5", custom_objects={'KerasLayer':hub.KerasLayer})
-        model.evaluate(self.Xtest, self.ytest)
+        scores = model.evaluate(self.Xtest, self.ytest)
+        self.eval_metrics = {'test_'+metric_n:score for metric_n, score in zip(model.metrics_names,scores)}
+
+        # Log Evaluation
+        mlflow.log_metrics(self.eval_metrics)
         self.next(self.end)
 
 
@@ -226,7 +272,12 @@ class TensorflowPipeline(FlowSpec):
         """
         End the flow.
         """
-        print("success")
+        import mlflow
+        mlflow.set_experiment(self.exp_name)
+        mlflow.start_run(run_id=self.run_id)
+
+        mlflow.log_artifacts(self.outputs_loc)
+        loggy.info("Metaflow Run Success")
 
 
 if __name__ == '__main__':

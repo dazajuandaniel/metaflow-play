@@ -4,20 +4,17 @@ File that holds the Model
 import tensorflow as tf
 import tensorflow_hub as hub
 
-# Logger
 import utils as u
 from logger import get_logger
 loggy = get_logger(__name__)
 
-def get_model(num_params, show_summary=True):
+def get_model(num_params, learning_rate = 0.01, show_summary=True, plot_image = None):
     """
     Function defines a Keras model and returns the model as Keras object
     Args:
         num_params
         show_summary
-    """    
-    loggy.info(str(num_params))
-    
+    """   
     # one-hot categorical features
     num_products = num_params['product']
     num_sub_products = num_params['sub_product']
@@ -65,19 +62,24 @@ def get_model(num_params, show_summary=True):
 
     keras_model = tf.keras.models.Model(_inputs, output)
     
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     keras_model.compile(optimizer=optimizer,
                         loss='binary_crossentropy',  
                         metrics=[tf.keras.metrics.BinaryAccuracy(),
                                  tf.keras.metrics.TruePositives(),
                                  tf.keras.metrics.Precision(),
                                  tf.keras.metrics.AUC(),
-                                 tf.keras.metrics.Accuracy(),
                                  tf.keras.metrics.Recall()])
     if show_summary:
+        loggy.info("Generating model summary..." )
         stringlist = []
         keras_model.summary(print_fn=lambda x: stringlist.append(x))
         short_model_summary = " \n".join(stringlist)
         loggy.info(short_model_summary)
+    
+    if plot_image is not None:
+        loggy.info("Generating model plot..." )
+        tf.keras.utils.plot_model(keras_model, to_file=plot_image, show_shapes=True)
+
 
     return keras_model

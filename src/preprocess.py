@@ -1,12 +1,17 @@
 """
 Functions that assist in data preprocessing
 """
-
+# Import Libraries
 import re
+import os
 import pandas as pd
 import numpy as np
 import tensorflow as tf
 from pandas_profiling import ProfileReport
+
+# Set up Logging
+from logger import get_logger
+loggy = get_logger(__name__)
 
 
 def change_column_names(columns:list) -> list:
@@ -64,8 +69,17 @@ def generate_pandas_profile(data:pd.core.frame.DataFrame, location:str) -> bool:
     Returns:
         None: Stores the file in a given location
     """
+    import os
     if location[-5:] not in [".html",".json"]:
         location = location+".json"
+
+
+    #Create Path
+    try:
+        os.makedirs(os.path.dirname(location),exist_ok = True)
+    except Exception as e:
+        loggy.error(e)
+        pass
 
     profile = ProfileReport(data, title="Pandas Profiling Report")
     profile.to_file(location)
